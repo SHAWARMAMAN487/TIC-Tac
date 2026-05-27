@@ -1,0 +1,1029 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>شطرنج — العب مع أصدقائك</title>
+<link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Cairo:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface2: #1a1a26;
+    --border: #2a2a3d;
+    --gold: #c9a84c;
+    --gold-light: #e8c97a;
+    --gold-dim: #7a6530;
+    --text: #e8e4d8;
+    --text-dim: #7a7568;
+    --white-sq: #f0d9b5;
+    --black-sq: #b58863;
+    --highlight: rgba(201,168,76,0.5);
+    --check: rgba(220,50,50,0.7);
+    --move: rgba(0,200,100,0.35);
+    --w-piece: #fff8e8;
+    --b-piece: #1a1520;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Cairo', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content:'';
+    position:fixed;
+    inset:0;
+    background:
+      radial-gradient(ellipse 60% 50% at 20% 20%, rgba(201,168,76,0.06) 0%, transparent 60%),
+      radial-gradient(ellipse 40% 40% at 80% 80%, rgba(100,80,160,0.06) 0%, transparent 60%);
+    pointer-events:none;
+    z-index:0;
+  }
+
+  .container { position:relative; z-index:1; width:100%; max-width:1100px; padding:0 16px; }
+
+  header {
+    width:100%;
+    padding:24px 0 16px;
+    text-align:center;
+    position:relative;
+    z-index:1;
+  }
+  .logo {
+    font-family:'Amiri', serif;
+    font-size:clamp(28px,5vw,48px);
+    color: var(--gold);
+    letter-spacing:2px;
+    text-shadow: 0 0 40px rgba(201,168,76,0.3);
+  }
+  .logo span { color: var(--text-dim); font-size:0.5em; display:block; font-family:'Cairo',sans-serif; font-weight:300; letter-spacing:4px; margin-top:2px; }
+  .divider { width:120px; height:1px; background:linear-gradient(90deg,transparent,var(--gold),transparent); margin:12px auto; }
+
+  .game-layout {
+    display:grid;
+    grid-template-columns: 220px 1fr 220px;
+    gap:20px;
+    align-items:start;
+    padding:10px 0 40px;
+  }
+
+  .panel {
+    background: var(--surface);
+    border:1px solid var(--border);
+    border-radius:12px;
+    padding:16px;
+    position:relative;
+    overflow:hidden;
+  }
+  .panel::before {
+    content:'';
+    position:absolute;
+    top:0; left:0; right:0;
+    height:2px;
+    background: linear-gradient(90deg, transparent, var(--gold-dim), transparent);
+  }
+  .panel-title {
+    font-size:12px;
+    font-weight:600;
+    letter-spacing:3px;
+    color:var(--gold-dim);
+    text-transform:uppercase;
+    margin-bottom:14px;
+    text-align:center;
+  }
+
+  .player-card {
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:8px;
+    padding:14px;
+    border-radius:10px;
+    border:1px solid var(--border);
+    transition:all 0.3s;
+    margin-bottom:12px;
+    background:var(--surface2);
+  }
+  .player-card.active {
+    border-color:var(--gold);
+    box-shadow:0 0 20px rgba(201,168,76,0.15);
+  }
+  .player-avatar {
+    width:48px; height:48px;
+    border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    font-size:22px;
+    border:2px solid var(--border);
+  }
+  .player-card.active .player-avatar { border-color:var(--gold); }
+  .player-name { font-weight:700; font-size:14px; }
+  .player-color { font-size:11px; color:var(--text-dim); }
+  .player-timer {
+    font-family:'Amiri',serif;
+    font-size:28px;
+    color:var(--gold-light);
+    letter-spacing:2px;
+  }
+  .player-card.active .player-timer { color:var(--gold); text-shadow:0 0 20px rgba(201,168,76,0.4); }
+
+  .captured-row {
+    display:flex;
+    flex-wrap:wrap;
+    gap:2px;
+    min-height:24px;
+    font-size:18px;
+    margin:4px 0;
+  }
+  .cap-label { font-size:11px; color:var(--text-dim); margin-bottom:4px; }
+
+  .board-wrapper {
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:8px;
+  }
+  .board-files {
+    display:grid;
+    grid-template-columns: 20px repeat(8,1fr);
+    width:100%;
+  }
+  .coord { 
+    display:flex; align-items:center; justify-content:center;
+    font-size:11px; color:var(--text-dim); font-weight:600;
+    height:20px;
+  }
+
+  #board {
+    display:grid;
+    grid-template-columns: 20px repeat(8, 1fr);
+    width:100%;
+    max-width:560px;
+    aspect-ratio:9/8;
+    border:2px solid var(--gold-dim);
+    border-radius:4px;
+    overflow:hidden;
+    box-shadow: 0 0 60px rgba(0,0,0,0.8), 0 0 30px rgba(201,168,76,0.1);
+  }
+  .rank-label {
+    background:#0f0f18;
+    display:flex; align-items:center; justify-content:center;
+    font-size:11px; color:var(--text-dim); font-weight:600;
+  }
+  .sq {
+    position:relative;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer;
+    transition:filter 0.1s;
+    aspect-ratio:1;
+  }
+  .sq.light { background:var(--white-sq); }
+  .sq.dark  { background:var(--black-sq); }
+  .sq.selected { background:var(--highlight) !important; filter:brightness(1.1); }
+  .sq.legal::after {
+    content:'';
+    position:absolute;
+    width:30%; height:30%;
+    border-radius:50%;
+    background:rgba(0,180,80,0.5);
+    box-shadow:0 0 8px rgba(0,180,80,0.4);
+    pointer-events:none;
+  }
+  .sq.legal.has-piece::after {
+    width:100%; height:100%;
+    background:transparent;
+    border-radius:0;
+    border:3px solid rgba(0,180,80,0.7);
+  }
+  .sq.in-check { background:var(--check) !important; }
+  .sq.last-move { box-shadow:inset 0 0 0 3px rgba(201,168,76,0.5); }
+
+  .piece {
+    font-size:clamp(22px,4.5vw,38px);
+    line-height:1;
+    user-select:none;
+    transition:transform 0.1s;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+    z-index:2;
+  }
+  .sq:hover .piece { transform:scale(1.08); }
+
+  #moveList {
+    max-height:220px;
+    overflow-y:auto;
+    scrollbar-width:thin;
+    scrollbar-color:var(--gold-dim) transparent;
+  }
+  .move-row {
+    display:grid;
+    grid-template-columns: 28px 1fr 1fr;
+    gap:4px;
+    padding:4px 6px;
+    border-radius:4px;
+    font-size:13px;
+    align-items:center;
+  }
+  .move-row:nth-child(odd) { background:var(--surface2); }
+  .move-num { color:var(--text-dim); font-size:11px; }
+  .move-notation {
+    padding:2px 6px;
+    border-radius:4px;
+    cursor:pointer;
+    transition:background 0.15s;
+    font-family:monospace;
+    letter-spacing:0.5px;
+  }
+  .move-notation:hover { background:var(--surface); }
+  .move-notation.current { color:var(--gold); font-weight:700; }
+
+  #status {
+    text-align:center;
+    padding:10px 20px;
+    border-radius:8px;
+    font-size:15px;
+    font-weight:600;
+    border:1px solid var(--border);
+    background:var(--surface2);
+    letter-spacing:0.5px;
+    min-width:200px;
+  }
+  #status.check { border-color:var(--gold); color:var(--gold); }
+  #status.gameover { border-color:#e05050; color:#e05050; }
+
+  .controls {
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .btn {
+    background:transparent;
+    border:1px solid var(--border);
+    color:var(--text);
+    padding:10px 14px;
+    border-radius:8px;
+    font-family:'Cairo',sans-serif;
+    font-size:13px;
+    font-weight:600;
+    cursor:pointer;
+    transition:all 0.2s;
+    text-align:center;
+    letter-spacing:0.5px;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+  }
+  .btn:hover { border-color:var(--gold-dim); color:var(--gold-light); background:rgba(201,168,76,0.05); }
+  .btn.primary { border-color:var(--gold-dim); background:rgba(201,168,76,0.1); color:var(--gold-light); }
+  .btn.primary:hover { background:rgba(201,168,76,0.2); }
+
+  .setting-row {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:8px 0;
+    border-bottom:1px solid var(--border);
+    font-size:13px;
+    gap:10px;
+  }
+  .setting-row label { color:var(--text-dim); }
+  .toggle {
+    position:relative; width:38px; height:20px;
+    background:var(--border); border-radius:10px; cursor:pointer; transition:background 0.2s;
+  }
+  .toggle.on { background:var(--gold-dim); }
+  .toggle::after {
+    content:''; position:absolute;
+    width:16px; height:16px; border-radius:50%;
+    background:#fff; top:2px; left:2px;
+    transition:left 0.2s;
+  }
+  .toggle.on::after { left:20px; }
+
+  .modal-overlay {
+    position:fixed; inset:0;
+    background:rgba(0,0,0,0.85);
+    display:flex; align-items:center; justify-content:center;
+    z-index:100;
+    backdrop-filter:blur(4px);
+    opacity:0; pointer-events:none;
+    transition:opacity 0.3s;
+  }
+  .modal-overlay.show { opacity:1; pointer-events:all; }
+  .modal {
+    background:var(--surface);
+    border:1px solid var(--gold-dim);
+    border-radius:16px;
+    padding:32px 40px;
+    text-align:center;
+    max-width:380px;
+    width:90%;
+    box-shadow:0 0 80px rgba(0,0,0,0.8), 0 0 30px rgba(201,168,76,0.15);
+    transform:scale(0.9);
+    transition:transform 0.3s;
+  }
+  .modal-overlay.show .modal { transform:scale(1); }
+  .modal-icon { font-size:56px; margin-bottom:12px; }
+  .modal-title { font-family:'Amiri',serif; font-size:28px; color:var(--gold); margin-bottom:8px; }
+  .modal-text { color:var(--text-dim); font-size:14px; line-height:1.7; margin-bottom:24px; }
+  .modal-btns { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; }
+
+  .promo-pieces {
+    display:flex; gap:12px; justify-content:center;
+    font-size:48px; margin:16px 0;
+  }
+  .promo-piece {
+    cursor:pointer; padding:8px; border-radius:8px;
+    border:2px solid var(--border);
+    transition:all 0.2s;
+    line-height:1;
+  }
+  .promo-piece:hover { border-color:var(--gold); background:rgba(201,168,76,0.1); transform:scale(1.1); }
+
+  .inp {
+    background:var(--surface2);
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:10px 14px;
+    color:var(--text);
+    font-family:'Cairo',sans-serif;
+    font-size:14px;
+    width:100%;
+    text-align:center;
+    transition:border-color 0.2s;
+  }
+  .inp:focus { outline:none; border-color:var(--gold-dim); }
+
+  .score-display {
+    display:flex;
+    justify-content:space-around;
+    padding:10px 0;
+    border-top:1px solid var(--border);
+    margin-top:10px;
+  }
+  .score-item { text-align:center; }
+  .score-val { font-size:22px; font-weight:900; color:var(--gold-light); font-family:'Amiri',serif; }
+  .score-lbl { font-size:10px; color:var(--text-dim); letter-spacing:1px; }
+
+  @media(max-width:800px) {
+    .game-layout { grid-template-columns:1fr; }
+    .panel.left-panel, .panel.right-panel { display:flex; flex-wrap:wrap; gap:12px; }
+    .player-card { flex:1; min-width:140px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    ♟ شطرنج
+    <span>العب مع أصدقائك</span>
+  </div>
+  <div class="divider"></div>
+</header>
+
+<div class="container">
+  <div class="game-layout">
+
+    <div class="panel left-panel">
+      <div class="panel-title">⚔ اللاعبون</div>
+      <div class="player-card" id="card-b">
+        <div class="player-avatar">♚</div>
+        <div class="player-name" id="name-b">لاعب ٢</div>
+        <div class="player-color">قطع سوداء</div>
+        <div class="player-timer" id="timer-b">10:00</div>
+      </div>
+      <div class="cap-label">قطع ملتقطة:</div>
+      <div class="captured-row" id="cap-b"></div>
+      <hr style="border-color:var(--border);margin:12px 0;">
+      <div class="player-card active" id="card-w">
+        <div class="player-avatar">♔</div>
+        <div class="player-name" id="name-w">لاعب ١</div>
+        <div class="player-color">قطع بيضاء</div>
+        <div class="player-timer" id="timer-w">10:00</div>
+      </div>
+      <div class="cap-label">قطع ملتقطة:</div>
+      <div class="captured-row" id="cap-w"></div>
+      <div class="score-display">
+        <div class="score-item">
+          <div class="score-val" id="score-w">0</div>
+          <div class="score-lbl">أبيض</div>
+        </div>
+        <div class="score-item"><div class="score-val">-</div></div>
+        <div class="score-item">
+          <div class="score-val" id="score-b">0</div>
+          <div class="score-lbl">أسود</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="board-wrapper">
+      <div id="status">دور اللاعب الأبيض ♙</div>
+      <div id="board"></div>
+      <div id="status-extra" style="font-size:12px;color:var(--text-dim);"></div>
+    </div>
+
+    <div class="panel right-panel">
+      <div class="panel-title">📋 الأدوار</div>
+      <div id="moveList"></div>
+      <hr style="border-color:var(--border);margin:14px 0;">
+      <div class="panel-title">⚙ الإعدادات</div>
+      <div class="controls">
+        <div class="setting-row">
+          <label>صوت الحركة</label>
+          <div class="toggle on" id="toggle-sound" onclick="toggleSetting('sound')"></div>
+        </div>
+        <div class="setting-row">
+          <label>إظهار التلميحات</label>
+          <div class="toggle on" id="toggle-hints" onclick="toggleSetting('hints')"></div>
+        </div>
+        <div class="setting-row">
+          <label>المؤقت (دقائق)</label>
+          <select class="inp" id="timer-select" style="padding:4px;font-size:12px;" onchange="changeTimer()">
+            <option value="0">بدون توقيت</option>
+            <option value="3">3 دقائق</option>
+            <option value="5">5 دقائق</option>
+            <option value="10" selected>10 دقائق</option>
+            <option value="15">15 دقائق</option>
+            <option value="30">30 دقائق</option>
+          </select>
+        </div>
+        <button class="btn primary" onclick="newGame()">🔄 لعبة جديدة</button>
+        <button class="btn" onclick="flipBoard()">🔃 قلب الرقعة</button>
+        <button class="btn" onclick="undoMove()">↩ تراجع</button>
+        <button class="btn" onclick="showSetup()">✏️ أسماء اللاعبين</button>
+        <button class="btn" onclick="offerDraw()">🤝 عرض تعادل</button>
+        <button class="btn" onclick="resignGame()">🏳️ استسلام</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-gameover">
+  <div class="modal">
+    <div class="modal-icon" id="modal-icon">🏆</div>
+    <div class="modal-title" id="modal-title">انتهت اللعبة</div>
+    <div class="modal-text" id="modal-text"></div>
+    <div class="modal-btns">
+      <button class="btn primary" onclick="newGame();closeModal('modal-gameover')">لعبة جديدة</button>
+      <button class="btn" onclick="closeModal('modal-gameover')">إغلاق</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-promo">
+  <div class="modal">
+    <div class="modal-title">اختر القطعة</div>
+    <div class="modal-text">ماذا تريد أن تصبح البيدق؟</div>
+    <div class="promo-pieces" id="promo-choices"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-setup">
+  <div class="modal">
+    <div class="modal-icon">♟</div>
+    <div class="modal-title">أسماء اللاعبين</div>
+    <div style="display:flex;flex-direction:column;gap:12px;margin:16px 0;">
+      <div>
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">اللاعب الأبيض ♙</div>
+        <input class="inp" id="inp-w" placeholder="اسم اللاعب الأبيض" value="لاعب ١">
+      </div>
+      <div>
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">اللاعب الأسود ♟</div>
+        <input class="inp" id="inp-b" placeholder="اسم اللاعب الأسود" value="لاعب ٢">
+      </div>
+    </div>
+    <div class="modal-btns">
+      <button class="btn primary" onclick="applySetup()">حفظ والبدء</button>
+      <button class="btn" onclick="closeModal('modal-setup')">إلغاء</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const PIECES = {
+  wK:'♔',wQ:'♕',wR:'♖',wB:'♗',wN:'♘',wP:'♙',
+  bK:'♚',bQ:'♛',bR:'♜',bB:'♝',bN:'♞',bP:'♟'
+};
+
+const initBoard = () => [
+  ['bR','bN','bB','bQ','bK','bB','bN','bR'],
+  ['bP','bP','bP','bP','bP','bP','bP','bP'],
+  [null,null,null,null,null,null,null,null],
+  [null,null,null,null,null,null,null,null],
+  [null,null,null,null,null,null,null,null],
+  [null,null,null,null,null,null,null,null],
+  ['wP','wP','wP','wP','wP','wP','wP','wP'],
+  ['wR','wN','wB','wQ','wK','wB','wN','wR']
+];
+
+let state = {
+  board: initBoard(),
+  turn: 'w',
+  selected: null,
+  legalMoves: [],
+  lastMove: null,
+  castling: { wK:true, wQR:true, wKR:true, bK:true, bQR:true, bKR:true },
+  enPassant: null,
+  moveHistory: [],
+  boardHistory: [],
+  captured: { w:[], b:[] },
+  flipped: false,
+  gameOver: false,
+  scores: { w:0, b:0 },
+  settings: { sound:true, hints:true, timerMin:10 },
+  timers: { w:600, b:600 },
+  timerInterval: null,
+  promoCallback: null,
+  kingPos: { w:[7,4], b:[0,4] },
+  halfMove: 0,
+};
+
+const color = p => p ? p[0] : null;
+const type  = p => p ? p[1] : null;
+const opp   = c => c==='w'?'b':'w';
+const inBounds = (r,c) => r>=0&&r<8&&c>=0&&c<8;
+
+function cloneBoard(b){ return b.map(r=>[...r]); }
+
+function getRawMoves(board, r, c, castling, enPassant){
+  const p = board[r][c];
+  if(!p) return [];
+  const col = color(p), tp = type(p);
+  const moves = [];
+  const add = (nr,nc) => { if(inBounds(nr,nc)) moves.push([nr,nc]); };
+
+  if(tp==='P'){
+    const dir = col==='w'?-1:1;
+    const startRow = col==='w'?6:1;
+    if(inBounds(r+dir,c) && !board[r+dir][c]){
+      add(r+dir,c);
+      if(r===startRow && !board[r+2*dir][c]) add(r+2*dir,c);
+    }
+    for(const dc of[-1,1]){
+      if(inBounds(r+dir,c+dc)){
+        if(board[r+dir][c+dc] && color(board[r+dir][c+dc])===opp(col)) add(r+dir,c+dc);
+        if(enPassant && enPassant[0]===r+dir && enPassant[1]===c+dc) add(r+dir,c+dc);
+      }
+    }
+  } else if(tp==='N'){
+    for(const [dr,dc] of[[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]]){
+      if(inBounds(r+dr,c+dc) && color(board[r+dr][c+dc])!==col) add(r+dr,c+dc);
+    }
+  } else if(tp==='K'){
+    for(const [dr,dc] of[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]]){
+      if(inBounds(r+dr,c+dc) && color(board[r+dr][c+dc])!==col) add(r+dr,c+dc);
+    }
+    if(col==='w' && r===7 && c===4){
+      if(castling.wKR && !board[7][5] && !board[7][6] &&
+         !isSquareAttacked(board,7,4,opp(col)) && !isSquareAttacked(board,7,5,opp(col)) && !isSquareAttacked(board,7,6,opp(col)))
+        moves.push([7,6,'castle']);
+      if(castling.wQR && !board[7][3] && !board[7][2] && !board[7][1] &&
+         !isSquareAttacked(board,7,4,opp(col)) && !isSquareAttacked(board,7,3,opp(col)) && !isSquareAttacked(board,7,2,opp(col)))
+        moves.push([7,2,'castle']);
+    }
+    if(col==='b' && r===0 && c===4){
+      if(castling.bKR && !board[0][5] && !board[0][6] &&
+         !isSquareAttacked(board,0,4,opp(col)) && !isSquareAttacked(board,0,5,opp(col)) && !isSquareAttacked(board,0,6,opp(col)))
+        moves.push([0,6,'castle']);
+      if(castling.bQR && !board[0][3] && !board[0][2] && !board[0][1] &&
+         !isSquareAttacked(board,0,4,opp(col)) && !isSquareAttacked(board,0,3,opp(col)) && !isSquareAttacked(board,0,2,opp(col)))
+        moves.push([0,2,'castle']);
+    }
+  } else {
+    const dirs = {
+      Q:[[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]],
+      R:[[-1,0],[1,0],[0,-1],[0,1]],
+      B:[[-1,-1],[-1,1],[1,-1],[1,1]]
+    };
+    for(const [dr,dc] of dirs[tp]){
+      let nr=r+dr, nc=c+dc;
+      while(inBounds(nr,nc)){
+        if(board[nr][nc]){
+          if(color(board[nr][nc])!==col) add(nr,nc);
+          break;
+        }
+        add(nr,nc); nr+=dr; nc+=dc;
+      }
+    }
+  }
+  return moves;
+}
+
+function isSquareAttacked(board, r, c, byColor){
+  for(let rr=0;rr<8;rr++) for(let cc=0;cc<8;cc++){
+    const p=board[rr][cc];
+    if(!p||color(p)!==byColor) continue;
+    const moves=getRawMoves(board,rr,cc,{wK:false,wQR:false,wKR:false,bK:false,bQR:false,bKR:false},null);
+    if(moves.some(m=>m[0]===r&&m[1]===c)) return true;
+  }
+  return false;
+}
+
+function findKing(board, col){
+  for(let r=0;r<8;r++) for(let c=0;c<8;c++) if(board[r][c]===col+'K') return [r,c];
+  return null;
+}
+
+function isInCheck(board, col){
+  const k=findKing(board,col);
+  return k ? isSquareAttacked(board,k[0],k[1],opp(col)) : false;
+}
+
+function getLegalMoves(r, c){
+  const p=state.board[r][c];
+  if(!p||color(p)!==state.turn) return [];
+  const raw=getRawMoves(state.board,r,c,state.castling,state.enPassant);
+  return raw.filter(([nr,nc,flag])=>{
+    const tmp=cloneBoard(state.board);
+    tmp[nr][nc]=tmp[r][c]; tmp[r][c]=null;
+    if(flag==='castle'){
+      const dc=nc===6?1:-1;
+      tmp[r][nc-dc]=tmp[r][nc];
+      tmp[r][nc===6?7:0]=null;
+    }
+    if(type(p)==='P' && nc!==c && !state.board[nr][nc]) tmp[r][nc]=null;
+    return !isInCheck(tmp,color(p));
+  });
+}
+
+function getAllLegalMoves(col){
+  const all=[];
+  for(let r=0;r<8;r++) for(let c=0;c<8;c++){
+    if(color(state.board[r][c])===col){
+      const moves=getLegalMoves(r,c);
+      if(moves.length) all.push({from:[r,c],moves});
+    }
+  }
+  return all;
+}
+
+function applyMove(fromR, fromC, toR, toC, promoType){
+  const p=state.board[fromR][fromC];
+  const col=color(p), tp=type(p);
+  const captured=state.board[toR][toC];
+
+  state.boardHistory.push({
+    board:cloneBoard(state.board),
+    castling:{...state.castling},
+    enPassant:state.enPassant,
+    captured:{w:[...state.captured.w],b:[...state.captured.b]},
+    lastMove:state.lastMove
+  });
+
+  let special='';
+
+  if(captured){ state.captured[col].push(captured); }
+
+  if(tp==='P' && toC!==fromC && !state.board[toR][toC]){
+    const epPiece=state.board[fromR][toC];
+    state.captured[col].push(epPiece);
+    state.board[fromR][toC]=null;
+    special='ep';
+  }
+
+  state.board[toR][toC]=p; state.board[fromR][fromC]=null;
+
+  if(tp==='K'){
+    if(toC===fromC+2){ state.board[toR][toC-1]=state.board[toR][7]; state.board[toR][7]=null; special='O-O'; }
+    if(toC===fromC-2){ state.board[toR][toC+1]=state.board[toR][0]; state.board[toR][0]=null; special='O-O-O'; }
+    state.kingPos[col]=[toR,toC];
+    if(col==='w'){ state.castling.wK=false; state.castling.wQR=false; state.castling.wKR=false; }
+    else { state.castling.bK=false; state.castling.bQR=false; state.castling.bKR=false; }
+  }
+  if(tp==='R'){
+    if(col==='w'){ if(fromC===7) state.castling.wKR=false; if(fromC===0) state.castling.wQR=false; }
+    else { if(fromC===7) state.castling.bKR=false; if(fromC===0) state.castling.bQR=false; }
+  }
+
+  state.enPassant = (tp==='P' && Math.abs(toR-fromR)===2) ? [(fromR+toR)/2, toC] : null;
+
+  if(tp==='P' && (toR===0||toR===7)){
+    const promo=promoType||'Q';
+    state.board[toR][toC]=col+promo;
+    special='='+(PIECES[col+promo]||promo);
+  }
+
+  state.lastMove={from:[fromR,fromC],to:[toR,toC]};
+  state.turn=opp(state.turn);
+
+  const files='abcdefgh';
+  const ranks='87654321';
+  const toNotation=files[toC]+ranks[toR];
+  let notation='';
+  if(special==='O-O'||special==='O-O-O') notation=special;
+  else {
+    if(tp!=='P') notation+=tp;
+    if(captured||(tp==='P'&&toC!==fromC)) notation+=(tp==='P'?files[fromC]:'')+'\u00d7';
+    notation+=toNotation;
+    if(special.startsWith('=')) notation+=special;
+  }
+
+  state.moveHistory.push({from:[fromR,fromC],to:[toR,toC],notation,col:opp(state.turn),special});
+
+  if(state.settings.sound) playSound(captured||special==='ep'?'capture':'move');
+  if(isInCheck(state.board,state.turn)) playSound('check');
+
+  state.halfMove++;
+}
+
+function playSound(type){
+  if(!state.settings.sound) return;
+  try {
+    const ctx=new (window.AudioContext||window.webkitAudioContext)();
+    const osc=ctx.createOscillator();
+    const gain=ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    if(type==='move'){ osc.frequency.setValueAtTime(440,ctx.currentTime); gain.gain.setValueAtTime(0.1,ctx.currentTime); }
+    else if(type==='capture'){ osc.frequency.setValueAtTime(280,ctx.currentTime); gain.gain.setValueAtTime(0.15,ctx.currentTime); }
+    else if(type==='check'){ osc.frequency.setValueAtTime(600,ctx.currentTime); gain.gain.setValueAtTime(0.12,ctx.currentTime); }
+    gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.15);
+    osc.start(); osc.stop(ctx.currentTime+0.15);
+  } catch(e){}
+}
+
+function startTimer(){
+  if(state.settings.timerMin===0) return;
+  if(state.timerInterval) clearInterval(state.timerInterval);
+  state.timerInterval=setInterval(()=>{
+    if(state.gameOver) return;
+    const t=state.turn;
+    state.timers[t]--;
+    if(state.timers[t]<=0){
+      state.timers[t]=0; updateTimerDisplay();
+      endGame(opp(t),'وقت',' نفد الوقت!');
+      return;
+    }
+    updateTimerDisplay();
+  },1000);
+}
+
+function updateTimerDisplay(){
+  ['w','b'].forEach(c=>{
+    const s=state.timers[c];
+    const m=Math.floor(s/60), sec=s%60;
+    document.getElementById('timer-'+c).textContent=`${m}:${sec.toString().padStart(2,'0')}`;
+  });
+  document.getElementById('card-w').classList.toggle('active',state.turn==='w');
+  document.getElementById('card-b').classList.toggle('active',state.turn==='b');
+}
+
+function changeTimer(){
+  const v=parseInt(document.getElementById('timer-select').value);
+  state.settings.timerMin=v;
+  if(confirm('تغيير المؤقت سيبدأ لعبة جديدة. هل أنت متأكد؟')) newGame();
+}
+
+function renderBoard(){
+  const boardEl=document.getElementById('board');
+  boardEl.innerHTML='';
+  const fl=state.flipped;
+
+  for(let row=0;row<8;row++){
+    const r=fl?7-row:row;
+    const lbl=document.createElement('div');
+    lbl.className='rank-label';
+    lbl.textContent=fl?row+1:8-row;
+    boardEl.appendChild(lbl);
+
+    for(let col=0;col<8;col++){
+      const c=fl?7-col:col;
+      const sq=document.createElement('div');
+      sq.className='sq '+((r+c)%2===0?'light':'dark');
+      sq.dataset.r=r; sq.dataset.c=c;
+
+      if(state.selected && state.selected[0]===r && state.selected[1]===c) sq.classList.add('selected');
+      if(state.lastMove){
+        if((state.lastMove.from[0]===r&&state.lastMove.from[1]===c)||(state.lastMove.to[0]===r&&state.lastMove.to[1]===c))
+          sq.classList.add('last-move');
+      }
+      if(state.settings.hints && state.legalMoves.some(m=>m[0]===r&&m[1]===c)){
+        sq.classList.add('legal');
+        if(state.board[r][c]) sq.classList.add('has-piece');
+      }
+      if(state.board[r][c]===state.turn+'K' && isInCheck(state.board,state.turn)) sq.classList.add('in-check');
+
+      if(state.board[r][c]){
+        const pi=document.createElement('div');
+        pi.className='piece';
+        pi.textContent=PIECES[state.board[r][c]];
+        sq.appendChild(pi);
+      }
+      sq.addEventListener('click',()=>handleClick(r,c));
+      boardEl.appendChild(sq);
+    }
+  }
+
+  updateStatus();
+  renderMoveList();
+  renderCaptured();
+  updateTimerDisplay();
+}
+
+function handleClick(r,c){
+  if(state.gameOver) return;
+
+  if(state.selected && state.legalMoves.some(m=>m[0]===r&&m[1]===c)){
+    const [fromR,fromC]=state.selected;
+    const p=state.board[fromR][fromC];
+
+    if(type(p)==='P' && (r===0||r===7)){
+      showPromoModal(color(p),(promo)=>{
+        applyMove(fromR,fromC,r,c,promo);
+        state.selected=null; state.legalMoves=[];
+        checkGameEnd(); renderBoard();
+      });
+    } else {
+      applyMove(fromR,fromC,r,c);
+      state.selected=null; state.legalMoves=[];
+      checkGameEnd(); renderBoard();
+    }
+    return;
+  }
+
+  if(state.board[r][c] && color(state.board[r][c])===state.turn){
+    state.selected=[r,c];
+    state.legalMoves=getLegalMoves(r,c);
+  } else {
+    state.selected=null; state.legalMoves=[];
+  }
+  renderBoard();
+}
+
+function updateStatus(){
+  const statusEl=document.getElementById('status');
+  if(state.gameOver) return;
+  const inCheck=isInCheck(state.board,state.turn);
+  const turnName=state.turn==='w'?'الأبيض':'الأسود';
+  const piece=state.turn==='w'?'♙':'♟';
+  if(inCheck){
+    statusEl.textContent=`⚠ كِش! دور ${turnName} ${piece}`;
+    statusEl.className='check';
+  } else {
+    statusEl.textContent=`دور ${turnName} ${piece}`;
+    statusEl.className='';
+  }
+}
+
+function checkGameEnd(){
+  const allMoves=getAllLegalMoves(state.turn);
+  if(allMoves.length===0){
+    if(isInCheck(state.board,state.turn)){
+      endGame(opp(state.turn),'كِش مات');
+    } else {
+      endGame(null,'تعادل','تعادل — لا حركات متاحة!');
+    }
+  }
+  const pieces=[];
+  for(let r=0;r<8;r++) for(let c=0;c<8;c++) if(state.board[r][c]) pieces.push(state.board[r][c]);
+  if(pieces.length===2) endGame(null,'تعادل','تعادل — قطع غير كافية!');
+}
+
+function endGame(winner, type, extra=''){
+  state.gameOver=true;
+  if(state.timerInterval) clearInterval(state.timerInterval);
+  const statusEl=document.getElementById('status');
+  statusEl.className='gameover';
+
+  if(winner){
+    const wname=winner==='w'?document.getElementById('name-w').textContent:document.getElementById('name-b').textContent;
+    const wpiece=winner==='w'?'♙':'♟';
+    statusEl.textContent=`🏆 فاز ${wname}!`;
+    state.scores[winner]++;
+    document.getElementById('score-'+winner).textContent=state.scores[winner];
+    showModal('modal-gameover','🏆','فوز!',`${wname} ${wpiece} فاز بـ${type}!${extra}`);
+  } else {
+    statusEl.textContent='🤝 تعادل!';
+    showModal('modal-gameover','🤝','تعادل!',extra||type);
+  }
+}
+
+function renderMoveList(){
+  const ml=document.getElementById('moveList');
+  ml.innerHTML='';
+  for(let i=0;i<state.moveHistory.length;i+=2){
+    const row=document.createElement('div');
+    row.className='move-row';
+    const num=document.createElement('span');
+    num.className='move-num'; num.textContent=(i/2+1)+'.';
+    row.appendChild(num);
+    const m1=document.createElement('span');
+    m1.className='move-notation'+(i===state.moveHistory.length-1?' current':'');
+    m1.textContent=state.moveHistory[i].notation;
+    row.appendChild(m1);
+    if(state.moveHistory[i+1]){
+      const m2=document.createElement('span');
+      m2.className='move-notation'+(i+1===state.moveHistory.length-1?' current':'');
+      m2.textContent=state.moveHistory[i+1].notation;
+      row.appendChild(m2);
+    } else { row.appendChild(document.createElement('span')); }
+    ml.appendChild(row);
+  }
+  ml.scrollTop=ml.scrollHeight;
+}
+
+const pieceValues={'Q':9,'R':5,'B':3,'N':3,'P':1,'K':0};
+function renderCaptured(){
+  ['w','b'].forEach(col=>{
+    const el=document.getElementById('cap-'+col);
+    el.innerHTML='';
+    const sorted=[...state.captured[col]].sort((a,b)=>pieceValues[type(b)]-pieceValues[type(a)]);
+    sorted.forEach(p=>{ const s=document.createElement('span'); s.textContent=PIECES[p]; el.appendChild(s); });
+  });
+}
+
+function newGame(){
+  if(state.timerInterval) clearInterval(state.timerInterval);
+  const min=state.settings.timerMin;
+  state.board=initBoard();
+  state.turn='w'; state.selected=null; state.legalMoves=[];
+  state.lastMove=null; state.castling={wK:true,wQR:true,wKR:true,bK:true,bQR:true,bKR:true};
+  state.enPassant=null; state.moveHistory=[]; state.boardHistory=[];
+  state.captured={w:[],b:[]}; state.gameOver=false;
+  state.kingPos={w:[7,4],b:[0,4]};
+  state.timers={w:min*60,b:min*60};
+  state.halfMove=0;
+  document.getElementById('status').className='';
+  if(min>0) startTimer();
+  renderBoard();
+}
+
+function undoMove(){
+  if(state.boardHistory.length===0||state.gameOver) return;
+  const prev=state.boardHistory.pop();
+  state.board=prev.board; state.castling=prev.castling; state.enPassant=prev.enPassant;
+  state.captured=prev.captured; state.lastMove=prev.lastMove;
+  state.moveHistory.pop();
+  state.turn=opp(state.turn);
+  state.gameOver=false;
+  state.selected=null; state.legalMoves=[];
+  renderBoard();
+}
+
+function flipBoard(){ state.flipped=!state.flipped; renderBoard(); }
+
+function offerDraw(){
+  if(state.gameOver) return;
+  const turnName=state.turn==='w'?'الأبيض':'الأسود';
+  const oName=opp(state.turn)==='w'?'الأبيض':'الأسود';
+  if(confirm(`${turnName} يعرض التعادل. هل يوافق ${oName}؟`)){
+    endGame(null,'تعادل باتفاق','تعادل باتفاق اللاعبين!');
+  }
+}
+
+function resignGame(){
+  if(state.gameOver) return;
+  const col=state.turn;
+  const name=col==='w'?document.getElementById('name-w').textContent:document.getElementById('name-b').textContent;
+  if(confirm(`هل تريد ${name} أن يستسلم؟`)) endGame(opp(col),'استسلام',`${name} استسلم!`);
+}
+
+function showSetup(){ document.getElementById('modal-setup').classList.add('show'); }
+
+function applySetup(){
+  const wn=document.getElementById('inp-w').value||'لاعب ١';
+  const bn=document.getElementById('inp-b').value||'لاعب ٢';
+  document.getElementById('name-w').textContent=wn;
+  document.getElementById('name-b').textContent=bn;
+  closeModal('modal-setup');
+  newGame();
+}
+
+function toggleSetting(key){
+  state.settings[key]=!state.settings[key];
+  const el=document.getElementById('toggle-'+key);
+  el.classList.toggle('on',state.settings[key]);
+}
+
+function showModal(id,icon,title,text){
+  document.getElementById('modal-icon').textContent=icon;
+  document.getElementById('modal-title').textContent=title;
+  document.getElementById('modal-text').textContent=text;
+  document.getElementById(id).classList.add('show');
+}
+function closeModal(id){ document.getElementById(id).classList.remove('show'); }
+
+function showPromoModal(col,cb){
+  const choices=['Q','R','B','N'];
+  const el=document.getElementById('promo-choices');
+  el.innerHTML='';
+  choices.forEach(tp=>{
+    const d=document.createElement('div');
+    d.className='promo-piece';
+    d.textContent=PIECES[col+tp];
+    d.onclick=()=>{ closeModal('modal-promo'); cb(tp); };
+    el.appendChild(d);
+  });
+  document.getElementById('modal-promo').classList.add('show');
+}
+
+newGame();
+setTimeout(()=>document.getElementById('modal-setup').classList.add('show'),300);
+</script>
+</body>
+</html>
