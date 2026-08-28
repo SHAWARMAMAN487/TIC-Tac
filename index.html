@@ -275,7 +275,7 @@
         <label>صدى: <span id="echoValue">5%</span></label>
         <input type="range" id="echoSlider" min="5" max="100" value="5">
       </div>
-      <div class="status" id="echoStatus">حرّك المؤشر وأنت تسمع — يزيد الصدى أو ينقص فورًا. لو اختفى الصوت بعد أول تحريك، أعد تحميل الصفحة.</div>
+      <div class="status" id="echoStatus">حرّك المؤشر وأنت تسمع — يزيد الصدى أو ينقص فورًا، ولا يوقف الصوت الأساسي أبدًا.</div>
     </div>
 
     <div class="panel" style="margin-top:16px;">
@@ -283,7 +283,7 @@
       <div class="btn-row">
         <button class="btn btn-gold" id="exportBtn">⬇ تصدير فيديو</button>
       </div>
-      <div class="status" id="exportStatus">يسجّل الفيديو من المعاينة مباشرة (مقطع WEBM). إن لم يعمل الصوت بسبب قيود المصدر الصوتي، نزّل المقطع الصوتي وسجّل الشاشة كبديل.</div>
+      <div class="status" id="exportStatus">يسجّل الفيديو من المعاينة (بدون صوت — قيود سيرفر الصوت). نزّل الصوت من الزر تحت وادمجهم ببرنامج مونتاج، أو سجّل الشاشة وانت تشغّل المعاينة كبديل بصوت مباشر.</div>
       <a id="audioDlLink" class="btn btn-outline" style="display:none;text-decoration:none;text-align:center;margin-top:8px;" download>⬇ تنزيل الصوت فقط</a>
     </div>
   </div>
@@ -310,6 +310,8 @@
 <footer>صوت التلاوات من mp3quran.net · نص القرآن من alquran.cloud · هذا المشروع أداة إنتاج شخصية وليس تابعًا لأي جهة رسمية</footer>
 
 <audio id="audioEl" preload="auto"></audio>
+<audio id="echoAudio1" preload="none"></audio>
+<audio id="echoAudio2" preload="none"></audio>
 
 <script>
 /* ---------------- DATA ---------------- */
@@ -445,7 +447,7 @@ async function init(){
   document.getElementById('seek').oninput = onSeek;
 
   audioEl.addEventListener('timeupdate', onTimeUpdate);
-  audioEl.addEventListener('ended', ()=>{ playing=false; document.getElementById('playBtn').textContent='▶'; });
+  audioEl.addEventListener('ended', ()=>{ playing=false; document.getElementById('playBtn').textContent='▶'; stopEcho(); });
 
   drawPlaceholder();
 }
@@ -479,6 +481,7 @@ async function loadRecitation(){
   const audioUrl = `${reciter.server}${padded}.mp3`;
 
   setStatus('loadStatus','جارِ التحميل…');
+  stopEcho();
 
   // 1) start audio loading immediately — independent of the text fetch
   audioEl.src = audioUrl;
@@ -568,7 +571,7 @@ function buildVerseList(){
     d.className='verse-item';
     d.dataset.idx = i;
     d.innerHTML = `<span class="num">${a.numberInSurah}</span>${a.text}`;
-    d.onclick = ()=>{ audioEl.currentTime = ayahTimes[i].start + 0.05; if(!playing) togglePlay(); };
+    d.onclick = ()=>{ audioEl.currentTime = ayahTimes[i].start + 0.05; if(!playing) togglePlay(); else scheduleEcho(); };
     box.appendChild(d);
   });
 }
@@ -576,14 +579,15 @@ function buildVerseList(){
 /* ---------------- PLAYBACK ---------------- */
 function togglePlay(){
   if(!audioEl.src){ return; }
-  if(audioCtx && audioCtx.state==='suspended') audioCtx.resume();
   if(playing){
     audioEl.pause(); playing=false;
     document.getElementById('playBtn').textContent='▶';
     cancelAnimationFrame(rafId);
+    stopEcho();
   } else {
     audioEl.play(); playing=true;
     document.getElementById('playBtn').textContent='⏸';
+    scheduleEcho();
     loop();
   }
 }
@@ -592,6 +596,7 @@ function onSeek(e){
   if(!audioEl.duration) return;
   const pct = e.target.value/1000;
   audioEl.currentTime = pct*audioEl.duration;
+  if(playing) scheduleEcho();
 }
 
 function onTimeUpdate(){
@@ -773,30 +778,25 @@ async function exportVideo(){
     setStatus('exportStatus','حمّل تلاوة أولًا.');
     return;
   }
-  setStatus('exportStatus','جارِ تحضير التسجيل…');
+  // NOTE: we deliberately do NOT attempt to route audio through the Web
+  // Audio API here (createMediaElementSource). mp3quran.net doesn't send
+  // CORS headers, and once that call is made on this element the browser
+  // permanently silences its direct output — which would break normal
+  // playback for the rest of the session. So export is video-only; use
+  // the "تنزيل الصوت فقط" button below to get the matching audio file
+  // and merge them in any video editor, or screen-record the preview
+  // with sound as a one-step alternative.
+  setStatus('exportStatus','جارِ تحضير التسجيل (فيديو بدون صوت — الصوت منفصل بالأسفل)…');
 
   audioEl.currentTime = 0;
   const canvasStream = canvas.captureStream(30);
-  let combined = canvasStream;
-
-  try{
-    const ctxAudio = new (window.AudioContext||window.webkitAudioContext)();
-    const src = ctxAudio.createMediaElementSource(audioEl);
-    const dest = ctxAudio.createMediaStreamDestination();
-    src.connect(dest);
-    src.connect(ctxAudio.destination);
-    const audioTrack = dest.stream.getAudioTracks()[0];
-    combined = new MediaStream([...canvasStream.getVideoTracks(), audioTrack]);
-  }catch(e){
-    setStatus('exportStatus','تعذّر تضمين الصوت (قيود المصدر) — سيتم تصدير الصورة فقط دون صوت. استخدم زر تنزيل الصوت لدمجه يدويًا.');
-  }
 
   const chunks=[];
   let recorder;
   try{
-    recorder = new MediaRecorder(combined, {mimeType:'video/webm;codecs=vp9,opus'});
+    recorder = new MediaRecorder(canvasStream, {mimeType:'video/webm;codecs=vp9'});
   }catch(e){
-    recorder = new MediaRecorder(combined);
+    recorder = new MediaRecorder(canvasStream);
   }
   recorder.ondataavailable = e=>{ if(e.data.size>0) chunks.push(e.data); };
   recorder.onstop = ()=>{
@@ -806,12 +806,13 @@ async function exportVideo(){
     a.href=url;
     a.download = `${currentSurah.name}-${document.getElementById('reciterSelect').value}.webm`;
     a.click();
-    setStatus('exportStatus','تم تنزيل الفيديو ✅');
+    setStatus('exportStatus','تم تنزيل الفيديو (بدون صوت) ✅ — نزّل الصوت من الزر تحت وادمجهم.');
   };
 
   playing=true;
   document.getElementById('playBtn').textContent='⏸';
   audioEl.play();
+  scheduleEcho();
   recorder.start();
   loop();
 
@@ -821,53 +822,59 @@ async function exportVideo(){
   });
 }
 
-/* ---------------- ECHO EFFECT (Web Audio) ---------------- */
-let audioCtx = null, echoSrcNode = null, dryGain = null, delayNode = null, feedbackGain = null, wetGain = null;
+/* ---------------- ECHO EFFECT (native, CORS-safe) ----------------
+   mp3quran.net does not send CORS headers, so routing the audio through
+   the Web Audio API (createMediaElementSource) permanently silences the
+   element's direct output the instant it's tainted — that's what caused
+   the sound to vanish. Instead we play the SAME stream a second and third
+   time, slightly delayed in real time and at lower volume, using plain
+   <audio> elements. That produces an audible echo with no CORS exposure
+   at all, and can never break the main track. */
+const echoAudio1 = document.getElementById('echoAudio1');
+const echoAudio2 = document.getElementById('echoAudio2');
 let echoPercent = 5;
-let echoGraphFailed = false;
+let echoTimers = [];
 
-function ensureEchoGraph(){
-  if(audioCtx || echoGraphFailed) return;
-  try{
-    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-    echoSrcNode = audioCtx.createMediaElementSource(audioEl);
-    dryGain = audioCtx.createGain();
-    delayNode = audioCtx.createDelay(2.0);
-    delayNode.delayTime.value = 0.32;
-    feedbackGain = audioCtx.createGain();
-    wetGain = audioCtx.createGain();
-
-    echoSrcNode.connect(dryGain);
-    dryGain.connect(audioCtx.destination);
-
-    echoSrcNode.connect(delayNode);
-    delayNode.connect(feedbackGain);
-    feedbackGain.connect(delayNode);
-    delayNode.connect(wetGain);
-    wetGain.connect(audioCtx.destination);
-
-    dryGain.gain.value = 1;
-    applyEchoParams(echoPercent);
-    setStatus('echoStatus','تفعّل تأثير الصدى — حرّك المؤشر.');
-  }catch(e){
-    echoGraphFailed = true;
-    setStatus('echoStatus','تعذّر تفعيل الصدى لهذا المصدر الصوتي (قيود السيرفر). الصوت العادي يبقى شغّال.');
-  }
+function clearEchoTimers(){
+  echoTimers.forEach(t=>clearTimeout(t));
+  echoTimers = [];
 }
 
-function applyEchoParams(percent){
-  if(!audioCtx || echoGraphFailed) return;
-  const p = percent/100;
-  feedbackGain.gain.setTargetAtTime(0.12 + p*0.55, audioCtx.currentTime, 0.05);
-  wetGain.gain.setTargetAtTime(p*0.9, audioCtx.currentTime, 0.05);
+function stopEcho(){
+  clearEchoTimers();
+  echoAudio1.pause();
+  echoAudio2.pause();
+}
+
+function scheduleEcho(){
+  clearEchoTimers();
+  if(!audioEl.src || !playing) return;
+  if(echoAudio1.src !== audioEl.currentSrc){ echoAudio1.src = audioEl.currentSrc; }
+  if(echoAudio2.src !== audioEl.currentSrc){ echoAudio2.src = audioEl.currentSrc; }
+
+  const posAtSchedule = audioEl.currentTime;
+  const delay1 = 300, delay2 = 620;
+
+  echoTimers.push(setTimeout(()=>{
+    if(!playing) return;
+    echoAudio1.currentTime = posAtSchedule;
+    echoAudio1.volume = Math.min(1, echoPercent/100 * 0.7);
+    echoAudio1.play().catch(()=>{});
+  }, delay1));
+
+  echoTimers.push(setTimeout(()=>{
+    if(!playing) return;
+    echoAudio2.currentTime = posAtSchedule;
+    echoAudio2.volume = Math.min(1, echoPercent/100 * 0.4);
+    echoAudio2.play().catch(()=>{});
+  }, delay2));
 }
 
 document.getElementById('echoSlider').addEventListener('input', e=>{
   echoPercent = parseInt(e.target.value);
   document.getElementById('echoValue').textContent = echoPercent+'%';
-  ensureEchoGraph();
-  if(audioCtx && audioCtx.state==='suspended') audioCtx.resume();
-  applyEchoParams(echoPercent);
+  echoAudio1.volume = Math.min(1, echoPercent/100 * 0.7);
+  echoAudio2.volume = Math.min(1, echoPercent/100 * 0.4);
 });
 
 init();
