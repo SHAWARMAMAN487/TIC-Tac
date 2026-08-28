@@ -270,6 +270,15 @@
     </div>
 
     <div class="panel" style="margin-top:16px;">
+      <h2>تأثير الصدى</h2>
+      <div class="field" style="margin-bottom:6px;">
+        <label>صدى: <span id="echoValue">5%</span></label>
+        <input type="range" id="echoSlider" min="5" max="100" value="5">
+      </div>
+      <div class="status" id="echoStatus">حرّك المؤشر وأنت تسمع — يزيد الصدى أو ينقص فورًا. لو اختفى الصوت بعد أول تحريك، أعد تحميل الصفحة.</div>
+    </div>
+
+    <div class="panel" style="margin-top:16px;">
       <h2>تصدير الفيديو</h2>
       <div class="btn-row">
         <button class="btn btn-gold" id="exportBtn">⬇ تصدير فيديو</button>
@@ -482,13 +491,16 @@ async function loadRecitation(){
     setTimeout(()=>finish(false), 15000); // don't hang forever
   });
 
-  // 2) fetch ayah text independently
+  // 2) fetch the FULL surah text (always) — the mp3 is the full surah,
+  //    so timing must be computed against all of it, not just the selected range,
+  //    otherwise seeking to a mid-surah ayah lands in the wrong place.
   let textOk = true;
+  let fullAyahs = [];
   try{
     const res = await fetch(`https://api.alquran.cloud/v1/surah/${surahId}/quran-uthmani`);
     if(!res.ok) throw new Error('HTTP '+res.status);
     const j = await res.json();
-    ayahs = j.data.ayahs.filter(a=>a.numberInSurah>=fromAyah && a.numberInSurah<=toAyah);
+    fullAyahs = j.data.ayahs;
   }catch(e){
     textOk = false;
     ayahs = [];
@@ -504,9 +516,20 @@ async function loadRecitation(){
   }
 
   if(textOk){
-    computeAyahTimes();
+    const fullTimes = computeFullAyahTimes(fullAyahs, audioEl.duration, parseInt(surahId));
+    const zipped = fullAyahs.map((a,i)=>({a, t:fullTimes[i]}));
+    const inRange = zipped.filter(z=>z.a.numberInSurah>=fromAyah && z.a.numberInSurah<=toAyah);
+    ayahs = inRange.map(z=>z.a);
+    ayahTimes = inRange.map(z=>z.t);
     buildVerseList();
-    setStatus('loadStatus', `تم — ${currentSurah.name} · ${reciter.name} (توقيت الآيات تقريبي).`);
+
+    // auto-skip the spoken "بسم الله الرحمن الرحيم" intro that isn't ayah 1
+    // (Al-Fatihah's ayah 1 IS the basmalah, and At-Tawbah has none)
+    const sid = parseInt(surahId);
+    if(fromAyah===1 && sid!==1 && sid!==9 && ayahTimes.length){
+      audioEl.currentTime = ayahTimes[0].start;
+    }
+    setStatus('loadStatus', `تم — ${currentSurah.name} · ${reciter.name} (توقيت الآيات تقريبي، والبسملة تُتخطى تلقائيًا).`);
   } else {
     ayahTimes = [{start:0,end:audioEl.duration}];
     document.getElementById('verseList').innerHTML = '';
@@ -518,20 +541,25 @@ async function loadRecitation(){
   draw();
 }
 
-/* proportional timing estimate based on ayah character length */
-function computeAyahTimes(){
-  const totalDuration = audioEl.duration;
-  const lens = ayahs.map(a=>a.text.replace(/[\u0610-\u061A\u064B-\u065F\u06D6-\u06ED]/g,'').length + 8);
+/* proportional timing estimate based on ayah character length,
+   computed over the FULL surah (the audio file is always the whole surah)
+   with an offset reserved for the spoken basmalah before ayah 1 */
+const BISMILLAH_OFFSET = 5.2; // seconds — rough estimate, varies by reciter
+function computeFullAyahTimes(fullAyahsArr, totalDuration, surahId){
+  const offset = (surahId===1 || surahId===9) ? 0 : Math.min(BISMILLAH_OFFSET, totalDuration*0.15);
+  const available = Math.max(totalDuration - offset, 1);
+  const lens = fullAyahsArr.map(a=>a.text.replace(/[\u0610-\u061A\u064B-\u065F\u06D6-\u06ED]/g,'').length + 8);
   const totalLen = lens.reduce((a,b)=>a+b,0);
   let acc = 0;
-  ayahTimes = lens.map(l=>{
-    const start = acc/totalLen*totalDuration;
+  return lens.map(l=>{
+    const start = offset + acc/totalLen*available;
     acc += l;
-    const end = acc/totalLen*totalDuration;
+    const end = offset + acc/totalLen*available;
     return {start,end};
   });
 }
 
+/* proportional timing estimate based on ayah character length */
 function buildVerseList(){
   const box = document.getElementById('verseList');
   box.innerHTML='';
@@ -548,6 +576,7 @@ function buildVerseList(){
 /* ---------------- PLAYBACK ---------------- */
 function togglePlay(){
   if(!audioEl.src){ return; }
+  if(audioCtx && audioCtx.state==='suspended') audioCtx.resume();
   if(playing){
     audioEl.pause(); playing=false;
     document.getElementById('playBtn').textContent='▶';
@@ -791,6 +820,55 @@ async function exportVideo(){
     audioEl.removeEventListener('ended', stopRec);
   });
 }
+
+/* ---------------- ECHO EFFECT (Web Audio) ---------------- */
+let audioCtx = null, echoSrcNode = null, dryGain = null, delayNode = null, feedbackGain = null, wetGain = null;
+let echoPercent = 5;
+let echoGraphFailed = false;
+
+function ensureEchoGraph(){
+  if(audioCtx || echoGraphFailed) return;
+  try{
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    echoSrcNode = audioCtx.createMediaElementSource(audioEl);
+    dryGain = audioCtx.createGain();
+    delayNode = audioCtx.createDelay(2.0);
+    delayNode.delayTime.value = 0.32;
+    feedbackGain = audioCtx.createGain();
+    wetGain = audioCtx.createGain();
+
+    echoSrcNode.connect(dryGain);
+    dryGain.connect(audioCtx.destination);
+
+    echoSrcNode.connect(delayNode);
+    delayNode.connect(feedbackGain);
+    feedbackGain.connect(delayNode);
+    delayNode.connect(wetGain);
+    wetGain.connect(audioCtx.destination);
+
+    dryGain.gain.value = 1;
+    applyEchoParams(echoPercent);
+    setStatus('echoStatus','تفعّل تأثير الصدى — حرّك المؤشر.');
+  }catch(e){
+    echoGraphFailed = true;
+    setStatus('echoStatus','تعذّر تفعيل الصدى لهذا المصدر الصوتي (قيود السيرفر). الصوت العادي يبقى شغّال.');
+  }
+}
+
+function applyEchoParams(percent){
+  if(!audioCtx || echoGraphFailed) return;
+  const p = percent/100;
+  feedbackGain.gain.setTargetAtTime(0.12 + p*0.55, audioCtx.currentTime, 0.05);
+  wetGain.gain.setTargetAtTime(p*0.9, audioCtx.currentTime, 0.05);
+}
+
+document.getElementById('echoSlider').addEventListener('input', e=>{
+  echoPercent = parseInt(e.target.value);
+  document.getElementById('echoValue').textContent = echoPercent+'%';
+  ensureEchoGraph();
+  if(audioCtx && audioCtx.state==='suspended') audioCtx.resume();
+  applyEchoParams(echoPercent);
+});
 
 init();
 </script>
